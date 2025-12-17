@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joc Estudiant</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; text-align: center; }
+        .hidden { display: none !important; } /* Forçar hidden */
+        #adminStatusMsg { 
+            background: #fff3cd; color: #856404; padding: 10px; 
+            border: 1px solid #ffeeba; display: none; margin-bottom: 20px; 
+        }
+        
+        input[type=range] { width: 50%; margin: 20px 0; }
+        
+        .val-box { font-size: 2em; font-weight: bold; color: #007bff; display: block; margin-bottom: 10px; }
+        
+        button { padding: 10px 20px; font-size: 16px; background: #007bff; color: white; border: none; cursor: pointer; margin-top: 10px; border-radius: 5px; width: 100%; max-width: 300px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+
+        .savings-display { background: #eef; padding: 10px; border-radius: 5px; margin: 10px auto; display: inline-block; font-weight: bold; color: #0056b3; }
+        
+        #lossScreen, #victoryScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 1000;
+        }
+        #lossScreen { background: rgba(100,0,0,0.95); color: white; }
+        
+        /* Estils de la pantalla de victòria */
+        #victoryScreen { 
+            background-color: #2ecc71; /* Verd èxit */
+            color: white; 
+        }
+
+        .coin-icon {
+            width: 100px; height: 100px;
+            background: #f1c40f;
+            border: 5px solid #f39c12;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 50px; font-weight: bold; color: #d35400;
+            margin: 20px auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            animation: bounce 2s infinite;
+        }
+
+        .victory-card {
+            background: white;
+            color: #333;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            max-width: 80%;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {transform: translateY(0);}
+            40% {transform: translateY(-20px);}
+            60% {transform: translateY(-10px);}
+        }
+
+        #coinOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); color: white;
+            display: none; justify-content: center; align-items: center; z-index: 999;
+        }
+
+        #historyPanel {
+            position: fixed; bottom: 10px; left: 10px;
+            background: #f9f9f9; border: 1px solid #ccc; border-radius: 5px;
+            padding: 10px; text-align: left; width: 150px; max-height: 200px;
+            overflow-y: auto; font-size: 0.8em; box-shadow: 2px 2px 5px rgba(0,0,0,0.1); z-index: 500;
+        }
+        #historyPanel h4 { margin: 0 0 5px 0; border-bottom: 1px solid #ddd; padding-bottom: 3px; }
+        #historyList { list-style: none; padding: 0; margin: 0; }
+        #historyList li { padding: 2px 0; border-bottom: 1px dashed #eee; }
+
+        /* --- NOUS ESTILS PER AL CÀSTIG --- */
+        #punishSection {
+            border: 2px dashed #f39c12;
+            background: #fcf3cf;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .punish-info { font-size: 0.9em; color: #7f8c8d; margin-bottom: 10px; }
+        .btn-punish { background: #e67e22; border-bottom: 4px solid #d35400; }
+        .btn-punish:hover { background: #d35400; }
+        .btn-disabled { background: #ccc !important; border: none !important; cursor: not-allowed; }
+
+    </style>
+</head>
+<body>
+
+    <div id="adminStatusMsg">⚠️ L'Administrador s'ha desconnectat. Esperant reconnexió...</div>
+
+    <div id="historyPanel" class="hidden">
+        <h4>Historial Partides</h4>
+        <ul id="historyList"><li style="color:gray">Cap partida jugada</li></ul>
+    </div>
+
+    <div id="lossScreen">
+        <h1>❌ HAS PERDUT</h1>
+        <p>El grup no ha assolit l'objectiu i la sort no ha acompanyat.</p>
+        <p style="font-size: 1.2em; font-weight: bold; color: #ffcccc; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;">
+            Tots els estalvis es perden.
+        </p>
+        <p>Espera a que l'administrador comenci una nova partida.</p>
+    </div>
+
+    <div id="victoryScreen">
+        <h1 style="font-size: 3em; margin-bottom: 10px;">🏆 ENHORABONA!</h1>
+        <p style="font-size: 1.5em; margin-top:0;">Medi ambient preservat!</p>
+        
+        <div class="victory-card">
+            <div class="coin-icon">€</div>
+            <p style="font-size: 1.2em;">Has aconseguit conservar:</p>
+            <span id="finalScoreDisplay" style="font-size: 3em; font-weight: bold; color: #27ae60;">0</span>
+            <p style="color: #777; margin-bottom:0;">monedes</p>
+        </div>
+    </div>
+
+    <div id="coinOverlay">
+        <h2>⚠️ Llindar no assolit!<br>Llançant moneda...</h2>
+    </div>
+
+    <div id="loginScreen">
+        <h2>Benvingut</h2>
+        <input type="text" id="nomInput" placeholder="El teu nom" style="padding:10px;">
+        <br><br>
+        <button onclick="entrar()">Entrar</button>
+    </div>
+
+    <div id="waitScreen" class="hidden">
+        <h2>Hola <span id="playerNameDisplay"></span></h2>
+        <div class="savings-display">Estalvis Actuals: <span id="totalSavingsDisplay1">0</span></div>
+        <p>Esperant l'inici del joc o la següent ronda...</p>
+        <p id="roundInfoDisplay"></p> 
+    </div>
+
+    <div id="gameScreen" class="hidden">
+        <h3 id="roundDisplay"></h3>
+        <div class="savings-display">Estalvis Actuals: <span id="totalSavingsDisplay2">0</span></div>
+        
+        <p style="font-size: 1.1em; color: #555;">Has cobrat 5 monedes.<br>Quantes en vols <strong>contribuïr</strong> per evitar el desastre?</p>
+        
+        <span id="sliderVal" class="val-box">0</span>
+        <input type="range" id="contribution" min="0" max="5" value="0" step="1" oninput="updateSlider(this.value)">
+        <br>
+        <button onclick="enviar()">Enviar Contribució</button>
+    </div>
+
+    <div id="resultScreen" class="hidden">
+        <h2>Resultats Ronda</h2>
+        <div id="resultText"></div>
+        
+        <div id="punishSection">
+            <h3>⚖️ Justícia Climàtica</h3>
+            <p class="punish-info">
+                Pots gastar <strong>1 moneda</strong> per castigar a algú que hagi contribuït <strong>menys de 3</strong>.
+                <br>La persona castigada perdrà <strong>3 monedes</strong>.
+            </p>
+            
+            <button id="btnPunish" onclick="votarCastig()" class="btn-punish">
+                🔨 Pagar 1 per Castigar
+            </button>
+            <p id="punishFeedback" style="display:none; font-weight:bold; color:#e67e22; margin-top:10px;">
+                Has sol·licitat un càstig.
+            </p>
+        </div>
+
+        <p style="margin-top:20px; font-style:italic; color:#aaa;">Esperant que el professor finalitzi la ronda...</p>
+    </div>
+
+    <script>
+        const socket = io();
+        let myUserId = localStorage.getItem('userId');
+        let currentSavings = 0; 
+
+        if (!myUserId) {
+            myUserId = 'user_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('userId', myUserId);
+        }
+
+        const savedName = localStorage.getItem('userName');
+        if (savedName) {
+            document.getElementById('nomInput').value = savedName;
+            socket.on('connect', entrar); 
+        }
+
+        socket.on('forceReload', () => {
+            alert("El servidor s'ha reiniciat completament.");
+            localStorage.removeItem('userName'); 
+            location.reload(); 
+        });
+
+        function entrar() {
+            const nom = document.getElementById('nomInput').value;
+            if (!nom) return alert("Posa un nom!");
+            localStorage.setItem('userName', nom);
+            socket.emit('joinGame', { userId: myUserId, name: nom });
+            
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('waitScreen').classList.remove('hidden');
+            document.getElementById('historyPanel').classList.remove('hidden'); 
+            document.getElementById('playerNameDisplay').innerText = nom;
+        }
+
+        function updateSlider(val) {
+            document.getElementById('sliderVal').innerText = val;
+        }
+
+        function updateSavingsDisplay(amount) {
+            currentSavings = amount;
+            document.getElementById('totalSavingsDisplay1').innerText = amount;
+            document.getElementById('totalSavingsDisplay2').innerText = amount;
+        }
+
+        function renderHistory(historyArray) {
+            const list = document.getElementById('historyList');
+            list.innerHTML = '';
+            if (historyArray.length === 0) {
+                list.innerHTML = '<li style="color:gray">Cap partida jugada</li>';
+                return;
+            }
+            [...historyArray].reverse().forEach((score, index) => {
+                const realIndex = historyArray.length - index;
+                const li = document.createElement('li');
+                if (score === 0) li.innerHTML = `Partida ${realIndex}: <span style="color:red">Fracàs (0)</span>`;
+                else li.innerHTML = `Partida ${realIndex}: <span style="color:green">Guanyat (${score})</span>`;
+                list.appendChild(li);
+            });
+        }
+
+        socket.on('welcome', (data) => {
+            document.getElementById('roundInfoDisplay').innerText = `Ronda actual: ${data.round} / ${data.maxRounds}`;
+            document.getElementById('roundDisplay').innerText = `Ronda ${data.round} / ${data.maxRounds}`;
+            updateSavingsDisplay(data.savings); 
+            renderHistory(data.history);
+            document.getElementById('lossScreen').style.display = 'none';
+            document.getElementById('victoryScreen').style.display = 'none';
+            document.getElementById('adminStatusMsg').style.display = 'none';
+        });
+
+        socket.on('gameStarted', (data) => {
+             updateSavingsDisplay(0); 
+             document.getElementById('roundInfoDisplay').innerText = `Ronda 1 / ${data.maxRounds}`;
+             document.getElementById('adminStatusMsg').style.display = 'none';
+        });
+
+        socket.on('newRound', (data) => {
+            const r = data.round || data; 
+            const max = data.maxRounds || "?"; 
+            
+            document.getElementById('roundDisplay').innerText = `Ronda ${r} / ${max}`;
+            document.getElementById('roundInfoDisplay').innerText = `Ronda ${r} / ${max}`;
+
+            document.getElementById('waitScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('lossScreen').style.display = 'none'; 
+            document.getElementById('victoryScreen').style.display = 'none';
+            document.getElementById('gameScreen').classList.remove('hidden');
+            document.getElementById('contribution').value = 0;
+            document.getElementById('sliderVal').innerText = "0";
+            document.getElementById('adminStatusMsg').style.display = 'none';
+
+            // RESET DE CÀSTIGS PER LA NOVA RONDA
+            const btn = document.getElementById('btnPunish');
+            btn.disabled = false;
+            btn.classList.remove('btn-disabled');
+            btn.innerHTML = "🔨 Pagar 1 per Castigar";
+            document.getElementById('punishFeedback').style.display = 'none';
+        });
+
+        socket.on('triggerCoinAnimation', () => {
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('waitScreen').classList.add('hidden');
+            document.getElementById('coinOverlay').style.display = 'flex';
+        });
+
+        socket.on('roundResult', (data) => {
+            document.getElementById('coinOverlay').style.display = 'none';
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
+            
+            let statusMsg = data.wasSavedByCoin ? 
+                "<span style='color:orange'>⚠️ Llindar no assolit, però...<br>🎉 LA MONEDA HA SORTIT CARA! Us heu salvat!</span>" : 
+                (data.success ? "<span style='color:green'>✅ Objectiu assolit!</span>" : "<span style='color:red'>❌ Objectiu Fallit! Desastre.</span>");
+
+            const msg = `
+                ${statusMsg}<br><br>
+                Has guardat: ${data.kept}<br>
+                <strong>Tens ara: ${data.savings} monedes</strong>
+            `;
+            document.getElementById('resultText').innerHTML = msg;
+            
+            updateSavingsDisplay(data.savings); 
+            document.getElementById('roundInfoDisplay').innerText = `Ronda ${data.round} / ${data.maxRounds} completada`;
+        });
+
+        // --- NOU: FUNCIÓ PER VOTAR CÀSTIG ---
+        function votarCastig() {
+            if(currentSavings < 1) {
+                alert("No tens prou monedes per pagar el càstig!");
+                return;
+            }
+            
+            socket.emit('requestPunish', { userId: myUserId });
+            
+            // Feedback visual immediat
+            const btn = document.getElementById('btnPunish');
+            btn.disabled = true;
+            btn.classList.add('btn-disabled');
+            btn.innerText = "Càstig Sol·licitat";
+            document.getElementById('punishFeedback').style.display = 'block';
+            
+            // Restem visualment (el servidor ho confirmarà després amb punishmentReport)
+            updateSavingsDisplay(currentSavings - 1);
+        }
+
+        // --- NOU: RESULTAT DEL CÀSTIG ---
+        socket.on('punishmentReport', (data) => {
+            // Actualitzem els estalvis reals finals de la ronda
+            updateSavingsDisplay(data.newSavings);
+            
+            if(data.punishedAmount > 0) {
+                alert(`AVÍS: Has estat castigat ${data.punishedAmount} vegada/es per contribuir poc.\nHas perdut ${data.punishedAmount * 3} monedes extres.`);
+            }
+        });
+
+        socket.on('updateHistory', (historyArray) => {
+            renderHistory(historyArray);
+        });
+
+        socket.on('gameLost', () => {
+            document.getElementById('coinOverlay').style.display = 'none';
+            document.getElementById('waitScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('lossScreen').style.display = 'flex';
+            updateSavingsDisplay(0);
+        });
+
+        socket.on('playerGameWon', (data) => {
+            document.getElementById('waitScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('victoryScreen').style.display = 'flex';
+            document.getElementById('finalScoreDisplay').innerText = data.finalSavings;
+            if (data.history) renderHistory(data.history);
+        });
+
+        socket.on('adminLeft', () => {
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('waitScreen').classList.remove('hidden');
+            document.getElementById('adminStatusMsg').style.display = 'block';
+        });
+
+        function enviar() {
+            const val = parseInt(document.getElementById('contribution').value);
+            socket.emit('submitContribution', { userId: myUserId, amount: val });
+            const keptNow = 5 - val;
+            const newTotal = currentSavings + keptNow;
+            updateSavingsDisplay(newTotal); 
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('waitScreen').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
